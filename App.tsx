@@ -232,15 +232,26 @@ const App: React.FC = () => {
     }
 
     // 3. Tools
-    if (msg.toolCall) {
+    if (msg.toolCall?.functionCalls) {
       const responses = msg.toolCall.functionCalls.map(fc => {
         let result = { status: 'ok' };
+        // Safe casting for TS strict mode
+        const args = (fc.args || {}) as any;
+
         if (fc.name === 'update_blackboard') {
-           setBlackboard({ isOpen: true, title: fc.args.title, content: fc.args.content });
+           setBlackboard({ 
+             isOpen: true, 
+             title: (args.title as string) || '', 
+             content: (args.content as string) || '' 
+           });
         } else if (fc.name === 'set_atmosphere') {
-           setAtmosphere(fc.args.mood);
+           setAtmosphere((args.mood as AtmosphereState) || 'default');
         } else if (fc.name === 'show_notification') {
-           setNotification({ visible: true, message: fc.args.message, type: fc.args.type });
+           setNotification({ 
+             visible: true, 
+             message: (args.message as string) || '', 
+             type: (args.type as NotificationState['type']) || 'info' 
+           });
         }
         return { id: fc.id, name: fc.name, response: { result } };
       });

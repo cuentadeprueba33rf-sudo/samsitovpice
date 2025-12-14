@@ -3,7 +3,7 @@ import { VisualizerProps } from '../types';
 
 const Visualizer: React.FC<VisualizerProps> = ({ analyser, isActive, mood }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number>(0);
 
   useEffect(() => {
     const canvas = canvasRef.current;
