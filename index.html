@@ -47,6 +47,21 @@
         animation: corePulse 3s infinite ease-in-out;
       }
 
+      /* New Animations for Loader */
+      @keyframes spinReverse {
+        from { transform: rotate(360deg); }
+        to { transform: rotate(0deg); }
+      }
+      .animate-spin-reverse {
+        animation: spinReverse 3s linear infinite;
+      }
+      @keyframes pingSlow {
+        75%, 100% { transform: scale(1.5); opacity: 0; }
+      }
+      .animate-ping-slow {
+        animation: pingSlow 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+      }
+
       /* Custom Scrollbar for history */
       ::-webkit-scrollbar {
         width: 4px;

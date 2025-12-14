@@ -7,11 +7,9 @@ import {
   CameraOff,
   Power,
   X,
-  Radio,
   Cpu,
   Zap,
-  Activity,
-  Maximize2
+  Activity
 } from 'lucide-react';
 import Visualizer from './components/Visualizer';
 import { ConnectionState, AtmosphereState, NotificationState } from './types';
@@ -28,12 +26,12 @@ const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 const SYSTEM_INSTRUCTION = `
 You are SAM (Synthetic Autonomous Mind).
-You are a pure voice interface. No chat bubbles.
+You are a pure voice interface.
 You are concise, intelligent, and have a slightly dry, sci-fi wit.
 Your creator is the SAM Verce Collective.
 
 VISUALS:
-- Use 'update_blackboard' ONLY when you need to show complex code, lists, or math that is hard to speak.
+- Use 'update_blackboard' ONLY when you need to show complex code, lists, or math.
 - Use 'set_atmosphere' to change the mood colors.
 - Use 'show_notification' for system alerts.
 `;
@@ -89,7 +87,7 @@ const App: React.FC = () => {
   const [atmosphere, setAtmosphere] = useState<AtmosphereState>('default');
   const [blackboard, setBlackboard] = useState({ isOpen: false, content: '', title: '' });
   const [notification, setNotification] = useState<NotificationState>({ visible: false, message: '', type: 'info' });
-  const [volumeLevel, setVolumeLevel] = useState(0); // For simple UI feedback
+  const [volumeLevel, setVolumeLevel] = useState(0); 
 
   // Audio/Video Refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -135,8 +133,6 @@ const App: React.FC = () => {
       mediaStreamRef.current = stream;
 
       // API Client
-      // IMPORTANT: Use process.env.API_KEY for Vercel/Production security.
-      // Do not hardcode keys in production apps.
       const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const sessionPromise = client.live.connect({
@@ -166,7 +162,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
       setConnectionState(ConnectionState.DISCONNECTED);
-      setNotification({ visible: true, message: "INIT FAILED - CHECK API KEY", type: "warning" });
+      setNotification({ visible: true, message: "INIT FAILED", type: "warning" });
     }
   };
 
@@ -197,9 +193,6 @@ const App: React.FC = () => {
   const startAudioInput = (stream: MediaStream, sessionPromise: Promise<any>) => {
     if (!audioContextRef.current) return;
 
-    // Use a separate context for input processing to avoid feedback loops if needed
-    // or reusing the main context but being careful with connections.
-    // For visualizer simplicity, we use the same concept as before.
     const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: AUDIO_INPUT_SAMPLE_RATE });
     const source = inputCtx.createMediaStreamSource(stream);
     const processor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -340,7 +333,7 @@ const App: React.FC = () => {
       <canvas ref={canvasRef} className="hidden" />
       <video ref={videoRef} className="hidden" muted playsInline />
 
-      {/* --- LAYER 1: VISUALIZER (THE CORE) --- */}
+      {/* --- LAYER 1: VISUALIZER (BACKGROUND) --- */}
       <div className="absolute inset-0 z-10 flex items-center justify-center">
         <Visualizer 
           analyser={analyserRef.current} 
@@ -357,7 +350,7 @@ const App: React.FC = () => {
           <div className="flex flex-col gap-1 animate-fade-in">
              <div className="flex items-center gap-2">
                 <Cpu size={18} className={getThemeColor().split(' ')[0]} />
-                <h1 className="font-tech text-2xl font-bold tracking-widest text-white">SAM <span className="text-xs opacity-50 font-normal">OS v3.0</span></h1>
+                <h1 className="font-tech text-2xl font-bold tracking-widest text-white">SAM <span className="text-xs opacity-50 font-normal">OS v3.1</span></h1>
              </div>
              <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-gray-500 uppercase">
                 <Activity size={10} />
@@ -374,6 +367,41 @@ const App: React.FC = () => {
               <span className="font-mono text-xs text-white uppercase tracking-wider">{notification.message}</span>
             </div>
           </div>
+        </div>
+
+        {/* CENTER CONTENT (START & LOADING SCREENS) */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            
+            {/* DISCONNECTED - Central Start Button */}
+            {connectionState === ConnectionState.DISCONNECTED && (
+              <button 
+                onClick={connectToGemini}
+                className="pointer-events-auto group relative flex flex-col items-center justify-center transition-all duration-700 hover:scale-105"
+              >
+                 <div className="relative w-32 h-32 flex items-center justify-center rounded-full border border-cyan-500/30 bg-black/50 backdrop-blur-md shadow-[0_0_30px_rgba(0,255,255,0.1)] group-hover:shadow-[0_0_60px_rgba(0,255,255,0.4)] transition-all">
+                    <Power size={48} className="text-cyan-500/80 group-hover:text-cyan-400 transition-colors" />
+                    <div className="absolute inset-0 rounded-full border border-cyan-400/20 animate-ping-slow"></div>
+                 </div>
+                 <span className="mt-6 font-tech text-lg tracking-[0.3em] text-cyan-500/80 group-hover:text-cyan-400">INITIALIZE SYSTEM</span>
+              </button>
+            )}
+
+            {/* CONNECTING - Central Full Loader */}
+            {connectionState === ConnectionState.CONNECTING && (
+               <div className="flex flex-col items-center justify-center animate-fade-in z-50 p-8 bg-black/40 backdrop-blur-xl rounded-2xl border border-white/5">
+                  <div className="relative w-24 h-24">
+                     <div className="absolute inset-0 rounded-full border-t-2 border-cyan-400 animate-spin"></div>
+                     <div className="absolute inset-2 rounded-full border-r-2 border-cyan-600 animate-spin-reverse"></div>
+                     <div className="absolute inset-0 flex items-center justify-center">
+                        <Cpu size={24} className="text-cyan-500 animate-pulse" />
+                     </div>
+                  </div>
+                  <div className="mt-8 flex flex-col items-center gap-2">
+                    <h2 className="font-tech text-xl text-cyan-400 tracking-widest animate-pulse">ESTABLISHING UPLINK</h2>
+                    <span className="font-mono text-xs text-cyan-500/50">SECURE HANDSHAKE IN PROGRESS...</span>
+                  </div>
+               </div>
+            )}
         </div>
 
         {/* CENTER BLACKBOARD (Modal) */}
@@ -395,32 +423,10 @@ const App: React.FC = () => {
            </div>
         )}
 
-        {/* BOTTOM BAR (CONTROLS) */}
-        <div className="flex items-end justify-center pointer-events-auto pb-8">
-           
-           {/* DISCONNECTED STATE */}
-           {connectionState === ConnectionState.DISCONNECTED && (
-              <button 
-                onClick={connectToGemini}
-                className="group relative flex items-center justify-center w-24 h-24 rounded-full border border-cyan-500/30 bg-black/50 hover:bg-cyan-900/10 transition-all duration-500 hover:scale-110 hover:shadow-[0_0_30px_rgba(0,255,255,0.3)]"
-              >
-                 <div className="absolute inset-0 rounded-full border border-cyan-500 opacity-20 animate-ping"></div>
-                 <Power size={32} className="text-cyan-400 group-hover:text-white transition-colors" />
-                 <span className="absolute -bottom-8 font-tech text-[10px] tracking-[0.3em] text-cyan-500/50">INITIALIZE</span>
-              </button>
-           )}
-
-           {/* CONNECTING STATE */}
-           {connectionState === ConnectionState.CONNECTING && (
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-16 h-16 rounded-full border-2 border-t-cyan-400 border-r-transparent border-b-cyan-400 border-l-transparent animate-spin"></div>
-                <span className="font-mono text-xs animate-pulse text-cyan-400">ESTABLISHING LINK...</span>
-              </div>
-           )}
-
-           {/* CONNECTED CONTROLS */}
+        {/* BOTTOM BAR (CONTROLS) - Only visible when CONNECTED */}
+        <div className="flex items-end justify-center pointer-events-auto pb-8 min-h-[100px]">
            {connectionState === ConnectionState.CONNECTED && (
-              <div className="flex items-center gap-6 animate-fade-in">
+              <div className="flex items-center gap-6 animate-fade-in bg-black/40 px-8 py-4 rounded-full border border-white/10 backdrop-blur-md">
                  
                  {/* Cam Toggle */}
                  <button 
@@ -428,23 +434,23 @@ const App: React.FC = () => {
                    className={`p-4 rounded-full border transition-all duration-300 hover:scale-105 ${
                      isCameraOn 
                      ? 'bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.4)]' 
-                     : 'bg-black/40 text-gray-400 border-gray-700 hover:border-gray-400 hover:text-white'
+                     : 'bg-transparent text-gray-400 border-gray-600 hover:border-gray-400 hover:text-white'
                    }`}
                  >
-                   {isCameraOn ? <Video size={20} /> : <CameraOff size={20} />}
+                   {isCameraOn ? <Video size={24} /> : <CameraOff size={24} />}
                  </button>
 
                  {/* Mic Toggle (Main) */}
                  <button 
                    onClick={() => setIsMicOn(!isMicOn)}
-                   className={`relative p-6 rounded-full border transition-all duration-300 hover:scale-110 ${
+                   className={`relative p-5 rounded-full border transition-all duration-300 hover:scale-110 ${
                      isMicOn 
-                     ? `bg-black/60 text-white border-white/50 shadow-[0_0_30px_rgba(255,255,255,0.15)]`
+                     ? `bg-cyan-900/20 text-cyan-400 border-cyan-500/50 shadow-[0_0_30px_rgba(0,255,255,0.15)]`
                      : 'bg-red-900/20 text-red-500 border-red-500/50'
                    }`}
                  >
                    {isMicOn ? <Mic size={28} /> : <MicOff size={28} />}
-                   {/* Voice Activity Ring */}
+                   {/* Voice Activity Indicator */}
                    {isMicOn && (
                      <div 
                        className="absolute inset-0 rounded-full border border-white/30 transition-transform duration-75"
@@ -456,9 +462,9 @@ const App: React.FC = () => {
                  {/* Disconnect */}
                  <button 
                    onClick={handleDisconnect}
-                   className="p-4 rounded-full bg-red-950/30 text-red-500 border border-red-900/50 hover:bg-red-900/50 hover:border-red-500 transition-all duration-300 hover:scale-105"
+                   className="p-4 rounded-full bg-transparent text-gray-400 border border-gray-600 hover:bg-red-900/30 hover:border-red-500 hover:text-red-500 transition-all duration-300 hover:scale-105"
                  >
-                   <X size={20} />
+                   <X size={24} />
                  </button>
 
               </div>
