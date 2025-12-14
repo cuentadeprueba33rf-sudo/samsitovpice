@@ -133,9 +133,9 @@ const App: React.FC = () => {
       mediaStreamRef.current = stream;
 
       // API Client
-      const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
-      const sessionPromise = client.live.connect({
+      const sessionPromise = ai.live.connect({
         model: MODEL_NAME,
         config: {
           responseModalities: [Modality.AUDIO],
