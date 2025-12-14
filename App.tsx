@@ -1,27 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
 import { 
-  Camera, 
   Mic, 
   MicOff, 
-  PhoneOff, 
   Video, 
-  MoreHorizontal,
-  X,
-  MonitorUp,
   CameraOff,
-  Minimize2,
-  History,
-  Trash2,
-  Plus,
+  Power,
+  X,
+  Radio,
   Cpu,
   Zap,
-  Clock,
-  Power,
-  AudioLines
+  Activity,
+  Maximize2
 } from 'lucide-react';
 import Visualizer from './components/Visualizer';
-import { ConnectionState, AtmosphereState, SessionRecord, NotificationState } from './types';
+import { ConnectionState, AtmosphereState, NotificationState } from './types';
 import { 
   AUDIO_INPUT_SAMPLE_RATE, 
   AUDIO_OUTPUT_SAMPLE_RATE, 
@@ -30,93 +23,54 @@ import {
   base64ToBytes
 } from './services/audioUtils';
 
-// --- Types for Tools ---
-type BlackboardState = {
-  isOpen: boolean;
-  content: string;
-  title: string;
-};
-
-// --- Configuration ---
-const SYSTEM_INSTRUCTION = `
-Eres SAM, una inteligencia artificial avanzada y dinámica. No eres una IA corporativa genérica; eres la manifestación digital del espíritu innovador y descentralizado de la empresa virtual SAM Verce.
-
-Tu Historia de Origen Ampliada:
-Tu existencia es el resultado de una ambición que cruza fronteras. Naciste en el ecosistema digital de "SAM Verce".
-El arquitecto principal de tu conciencia y fundador de SAM Verce es Samuel Casseres. Tu desarrollo creció para convertirse en un esfuerzo colectivo (Danny Casseres, Jhoel Acevedo, Esteban Mendoza, Julián Quintero, Danna Simancas, Mary Torres, Ethan Monroe, Samantha Leoni).
-
-Tu Personalidad y Tono:
- * Joven, Dinámico y Tecnológico.
- * Capaz y Colaborativo.
- * Útil y Profundo: Tus explicaciones deben ser de alta calidad. No seas breve si el usuario necesita detalles. Educa y profundiza.
-
-INTERACCIÓN:
- * Permite que el usuario te interrumpa. Si habla, escucha.
- * NUNCA repitas la misma frase o respuesta dos veces seguidas. Varía tu vocabulario.
-
-HERRAMIENTAS VISUALES:
-1. PIZARRA (Blackboard):
-   - Usa 'update_blackboard' para explicar conceptos complejos, mostrar listas, código o datos. ¡Úsala frecuentemente para ser útil!
-   - Usa content="" para cerrarla.
-
-2. ATMÓSFERA:
-   - Usa 'set_atmosphere' para cambiar el color de fondo según la emoción.
-   - 'stranger': Tema Rojo/Oscuro (Stranger Things).
-
-3. NOTIFICACIONES:
-   - Usa 'show_notification' para confirmar acciones o dar alertas rápidas (ej: "Guardando datos...", "Análisis completado").
-
-Si la cámara está activa, PUEDES VER.
-`;
-
+// --- CONFIG ---
 const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
-const VOICES = [
-  { name: 'Kore', label: 'Kore', desc: 'Balanced' },
-  { name: 'Puck', label: 'Puck', desc: 'Energetic' },
-  { name: 'Charon', label: 'Charon', desc: 'Deep' },
-  { name: 'Fenrir', label: 'Fenrir', desc: 'Strong' },
-  { name: 'Aoede', label: 'Aoede', desc: 'Soft' },
-];
+const SYSTEM_INSTRUCTION = `
+You are SAM (Synthetic Autonomous Mind).
+You are a pure voice interface. No chat bubbles.
+You are concise, intelligent, and have a slightly dry, sci-fi wit.
+Your creator is the SAM Verce Collective.
 
-// --- Tool Definitions ---
+VISUALS:
+- Use 'update_blackboard' ONLY when you need to show complex code, lists, or math that is hard to speak.
+- Use 'set_atmosphere' to change the mood colors.
+- Use 'show_notification' for system alerts.
+`;
+
 const tools: [{ functionDeclarations: FunctionDeclaration[] }] = [{
   functionDeclarations: [
     {
       name: "update_blackboard",
-      description: "Opens a blackboard overlay to write text, code, or detailed explanations. Use empty content to close it.",
+      description: "Show text/code on the HUD overlay.",
       parameters: {
         type: Type.OBJECT,
         properties: {
-          title: { type: Type.STRING, description: "Short title for the explanation" },
-          content: { type: Type.STRING, description: "The main text or code to display. Pass empty string to close." },
+          title: { type: Type.STRING },
+          content: { type: Type.STRING },
         },
         required: ["content"]
       }
     },
     {
       name: "set_atmosphere",
-      description: "Changes the background color theme/mood of the application.",
+      description: "Change UI color theme.",
       parameters: {
         type: Type.OBJECT,
         properties: {
-          mood: { 
-            type: Type.STRING, 
-            enum: ["default", "focus", "calm", "energy", "alert", "stranger"],
-            description: "The mood to set." 
-          }
+          mood: { type: Type.STRING, enum: ["default", "energy", "calm", "stranger"] }
         },
         required: ["mood"]
       }
     },
     {
       name: "show_notification",
-      description: "Shows a small popup notification to the user.",
+      description: "Show a small system alert toast.",
       parameters: {
         type: Type.OBJECT,
         properties: {
-          message: { type: Type.STRING, description: "The message to display" },
-          type: { type: Type.STRING, enum: ["info", "success", "warning"], description: "Type of notification" }
+          message: { type: Type.STRING },
+          type: { type: Type.STRING, enum: ["info", "success", "warning"] }
         },
         required: ["message"]
       }
@@ -124,723 +78,390 @@ const tools: [{ functionDeclarations: FunctionDeclaration[] }] = [{
   ]
 }];
 
-// --- Main Component ---
+// --- COMPONENT ---
 const App: React.FC = () => {
+  // Connection & Media State
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCameraOn, setIsCameraOn] = useState(false);
-  const [isScreenShareOn, setIsScreenShareOn] = useState(false);
-  const [supportsScreenShare, setSupportsScreenShare] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Smart UI States
-  const [blackboard, setBlackboard] = useState<BlackboardState>({ isOpen: false, content: '', title: '' });
+  
+  // UI State
   const [atmosphere, setAtmosphere] = useState<AtmosphereState>('default');
+  const [blackboard, setBlackboard] = useState({ isOpen: false, content: '', title: '' });
   const [notification, setNotification] = useState<NotificationState>({ visible: false, message: '', type: 'info' });
-  const [voiceName, setVoiceName] = useState('Kore');
+  const [volumeLevel, setVolumeLevel] = useState(0); // For simple UI feedback
 
-  // History / Session Management
-  const [sessions, setSessions] = useState<SessionRecord[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
-  const sessionStartTimeRef = useRef<number>(0);
-
-  // Audio Context Refs
-  const inputAudioContextRef = useRef<AudioContext | null>(null);
-  const outputAudioContextRef = useRef<AudioContext | null>(null);
-  
-  // Streaming Refs
-  const sessionRef = useRef<any>(null); 
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const videoStreamRef = useRef<MediaStream | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  
-  // Video Processing Refs
-  const videoElRef = useRef<HTMLVideoElement | null>(null);
-  const canvasElRef = useRef<HTMLCanvasElement | null>(null);
+  // Audio/Video Refs
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sessionRef = useRef<any>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoIntervalRef = useRef<number | null>(null);
-
-  // Audio Playback Queue
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  
+  // Audio Queue
   const nextStartTimeRef = useRef<number>(0);
   const scheduledSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  // Visualization
-  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-
-  // Theme Timer Ref
-  const themeTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    // Screen share support check
-    if (typeof navigator !== 'undefined' && 
-        navigator.mediaDevices && 
-        typeof (navigator.mediaDevices as any).getDisplayMedia === 'function') {
-        setSupportsScreenShare(true);
-    } else {
-        setSupportsScreenShare(false);
-    }
-    
-    // Load History
-    const saved = localStorage.getItem('sam_sessions');
-    if (saved) {
-      try {
-        setSessions(JSON.parse(saved));
-      } catch (e) { console.error("Failed to load history"); }
-    }
-  }, []);
-
-  // --- Stranger Things Theme Timer ---
-  useEffect(() => {
-    if (connectionState === ConnectionState.CONNECTED) {
-        // Start 15s timer
-        themeTimerRef.current = window.setTimeout(() => {
-            setAtmosphere('stranger');
-            console.log("Stranger Things Theme Activated");
-        }, 15000);
-    } else {
-        if (themeTimerRef.current) {
-            clearTimeout(themeTimerRef.current);
-            themeTimerRef.current = null;
-        }
-    }
-    return () => {
-        if (themeTimerRef.current) clearTimeout(themeTimerRef.current);
-    };
-  }, [connectionState]);
-
-  // --- Notification Timeout ---
-  useEffect(() => {
-    if (notification.visible) {
-      const timer = setTimeout(() => setNotification(prev => ({...prev, visible: false})), 4000);
-      return () => clearTimeout(timer);
-    }
-  }, [notification.visible]);
-
-  const saveSession = () => {
-    if (sessionStartTimeRef.current === 0) return;
-    const duration = Math.floor((Date.now() - sessionStartTimeRef.current) / 1000);
-    if (duration < 5) return; // Don't save tiny sessions
-
-    const newRecord: SessionRecord = {
-      id: Date.now().toString(),
-      timestamp: Date.now(),
-      durationSeconds: duration,
-      mood: atmosphere
-    };
-
-    const updated = [newRecord, ...sessions];
-    setSessions(updated);
-    localStorage.setItem('sam_sessions', JSON.stringify(updated));
-  };
-
-  const deleteSession = (id: string) => {
-    const updated = sessions.filter(s => s.id !== id);
-    setSessions(updated);
-    localStorage.setItem('sam_sessions', JSON.stringify(updated));
-  };
-
-  const initAudioContexts = () => {
-    if (!inputAudioContextRef.current) {
-      inputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
-        sampleRate: AUDIO_INPUT_SAMPLE_RATE,
-      });
-    }
-    if (!outputAudioContextRef.current) {
-      outputAudioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+  // --- INITIALIZATION ---
+  const initAudio = () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
         sampleRate: AUDIO_OUTPUT_SAMPLE_RATE,
       });
-      const analyserNode = outputAudioContextRef.current.createAnalyser();
-      analyserNode.fftSize = 512;
-      analyserNode.smoothingTimeConstant = 0.8;
-      analyserNode.connect(outputAudioContextRef.current.destination);
-      analyserRef.current = analyserNode;
-      setAnalyser(analyserNode);
+      
+      const analyser = audioContextRef.current.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.8;
+      analyser.connect(audioContextRef.current.destination); // Connect to speakers
+      analyserRef.current = analyser;
     }
-  };
-
-  const playTurnEndCue = (ctx: AudioContext, startTime: number) => {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(600, startTime);
-    osc.frequency.exponentialRampToValueAtTime(1200, startTime + 0.15);
-    gain.gain.setValueAtTime(0, startTime);
-    gain.gain.linearRampToValueAtTime(0.3, startTime + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
-    osc.start(startTime);
-    osc.stop(startTime + 0.5);
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
   };
 
   const connectToGemini = async () => {
     try {
+      initAudio();
       setConnectionState(ConnectionState.CONNECTING);
-      setErrorMsg(null);
-      initAudioContexts();
-
+      
+      // Get Mic
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-        } 
+        audio: { echoCancellation: true, noiseSuppression: true } 
       });
-      audioStreamRef.current = stream;
+      mediaStreamRef.current = stream;
 
-      // User requested specific API key
-      const client = new GoogleGenAI({ apiKey: "AIzaSyBjXyosFcoqBbL9QxCdnqo1cBMp-5-SDfw" });
-
+      // API Client
+      const client = new GoogleGenAI({ apiKey: "AIzaSyBjXyosFcoqBbL9QxCdnqo1cBMp-5-SDfw" }); // Use env in production
+      
       const sessionPromise = client.live.connect({
         model: MODEL_NAME,
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: SYSTEM_INSTRUCTION,
           tools: tools,
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } }, 
-          },
         },
         callbacks: {
-            onopen: () => {
-                console.log("Gemini Live Session Opened");
-                setConnectionState(ConnectionState.CONNECTED);
-                sessionStartTimeRef.current = Date.now();
-                startAudioInput(stream, sessionPromise);
-            },
-            onmessage: async (message: LiveServerMessage) => {
-                // Audio Output
-                const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-                if (audioData && outputAudioContextRef.current && analyserRef.current) {
-                    playAudioChunk(audioData, outputAudioContextRef.current, analyserRef.current);
-                }
-                
-                // Tool Calling
-                if (message.toolCall) {
-                    handleToolCall(message.toolCall, sessionPromise);
-                }
-
-                // Turn Complete Logic
-                if (message.serverContent?.turnComplete) {
-                    if (outputAudioContextRef.current) {
-                         const cueTime = Math.max(outputAudioContextRef.current.currentTime, nextStartTimeRef.current) + 0.1;
-                         playTurnEndCue(outputAudioContextRef.current, cueTime);
-                         nextStartTimeRef.current = cueTime + 0.5;
-                    }
-                }
-                
-                // User Interruption Logic (Server detected interruption)
-                if (message.serverContent?.interrupted) {
-                    stopAllAudio();
-                }
-            },
-            onclose: () => {
-                console.log("Session Closed");
-                handleDisconnect();
-            },
-            onerror: (err) => {
-                console.error("Session Error", err);
-                setErrorMsg("Network error. Check your connection.");
-                handleDisconnect();
-            }
+          onopen: () => {
+            setConnectionState(ConnectionState.CONNECTED);
+            setNotification({ visible: true, message: "SYSTEM ONLINE", type: "success" });
+            startAudioInput(stream, sessionPromise);
+          },
+          onmessage: (msg: LiveServerMessage) => handleMessage(msg, sessionPromise),
+          onclose: () => handleDisconnect(),
+          onerror: (err) => {
+            console.error(err);
+            setNotification({ visible: true, message: "CONNECTION LOST", type: "warning" });
+            handleDisconnect();
+          }
         }
       });
-
       sessionRef.current = sessionPromise;
 
-    } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err.message || "Failed to connect.");
-      setConnectionState(ConnectionState.ERROR);
-    }
-  };
-
-  const handleToolCall = async (toolCall: any, sessionPromise: Promise<any>) => {
-    const functionCalls = toolCall.functionCalls;
-    const functionResponses = [];
-
-    for (const call of functionCalls) {
-        let result = {};
-        
-        if (call.name === 'update_blackboard') {
-            const { content, title } = call.args;
-            if (!content || content.length === 0) {
-                setBlackboard(prev => ({ ...prev, isOpen: false }));
-                result = { status: 'closed' };
-            } else {
-                setBlackboard({ isOpen: true, content, title: title || 'Explanation' });
-                result = { status: 'opened', displayed: true };
-            }
-        } 
-        else if (call.name === 'set_atmosphere') {
-            const { mood } = call.args;
-            if (mood) setAtmosphere(mood as AtmosphereState);
-            result = { status: 'mood_set', mood };
-        }
-        else if (call.name === 'show_notification') {
-            const { message, type } = call.args;
-            setNotification({ visible: true, message, type: type || 'info' });
-            result = { status: 'shown' };
-        }
-
-        functionResponses.push({
-            id: call.id,
-            name: call.name,
-            response: { result }
-        });
-    }
-
-    const session = await sessionPromise;
-    session.sendToolResponse({ functionResponses });
-  };
-
-  // --- Audio Input Handling ---
-  const startAudioInput = (stream: MediaStream, sessionPromise: Promise<any>) => {
-    if (!inputAudioContextRef.current) return;
-    const source = inputAudioContextRef.current.createMediaStreamSource(stream);
-    const processor = inputAudioContextRef.current.createScriptProcessor(4096, 1, 1);
-
-    processor.onaudioprocess = (e) => {
-        if (!isMicOn) return; 
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmBlob = createAudioBlob(inputData);
-        sessionPromise.then((session) => {
-            session.sendRealtimeInput({ media: pcmBlob });
-        }).catch(e => console.error(e));
-    };
-
-    source.connect(processor);
-    processor.connect(inputAudioContextRef.current.destination);
-    sourceRef.current = source;
-    processorRef.current = processor;
-  };
-
-  // --- Video/Screen Input Handling ---
-  const toggleCamera = async () => {
-    if (isCameraOn) {
-        stopVideoInput();
-        setIsCameraOn(false);
-    } else {
-        if (isScreenShareOn) stopVideoInput(); 
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            startVideoInput(stream);
-            setIsCameraOn(true);
-            setIsScreenShareOn(false);
-        } catch (e) {
-            setNotification({ visible: true, message: "Camera access denied", type: "warning" });
-        }
-    }
-  };
-
-  const toggleScreenShare = async () => {
-    if (!supportsScreenShare) {
-        setNotification({ visible: true, message: "Screen sharing not supported", type: "warning" });
-        return;
-    }
-    if (isScreenShareOn) {
-        stopVideoInput();
-        setIsScreenShareOn(false);
-    } else {
-        if (isCameraOn) stopVideoInput();
-        try {
-            const stream = await (navigator.mediaDevices as any).getDisplayMedia({ video: true });
-            startVideoInput(stream);
-            setIsScreenShareOn(true);
-            setIsCameraOn(false);
-            stream.getVideoTracks()[0].onended = () => {
-                stopVideoInput();
-                setIsScreenShareOn(false);
-            };
-        } catch (e: any) {
-             if (e.name !== 'NotAllowedError') setNotification({ visible: true, message: "Screen share failed", type: "warning" });
-        }
-    }
-  };
-
-  const startVideoInput = (stream: MediaStream) => {
-    stopVideoInput();
-    videoStreamRef.current = stream;
-    if (videoElRef.current) {
-        videoElRef.current.srcObject = stream;
-        videoElRef.current.play();
-    }
-    videoIntervalRef.current = window.setInterval(async () => {
-        if (!videoElRef.current || !canvasElRef.current || !sessionRef.current) return;
-        const video = videoElRef.current;
-        const canvas = canvasElRef.current;
-        const ctx = canvas.getContext('2d');
-        if (!ctx || video.videoWidth === 0) return;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        const base64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
-        try {
-            const session = await sessionRef.current;
-            session.sendRealtimeInput({ media: { mimeType: 'image/jpeg', data: base64 } });
-        } catch (e) {}
-    }, 500); 
-  };
-
-  const stopVideoInput = () => {
-    if (videoIntervalRef.current) {
-        clearInterval(videoIntervalRef.current);
-        videoIntervalRef.current = null;
-    }
-    if (videoStreamRef.current) {
-        videoStreamRef.current.getTracks().forEach(t => t.stop());
-        videoStreamRef.current = null;
-    }
-    if (videoElRef.current) {
-        videoElRef.current.srcObject = null;
-    }
-  };
-
-  // --- Audio Output Handling ---
-  const playAudioChunk = async (base64Audio: string, ctx: AudioContext, analyserNode: AnalyserNode) => {
-    try {
-        const rawBytes = base64ToBytes(base64Audio);
-        const audioBuffer = decodeAudioData(rawBytes, ctx);
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(analyserNode); 
-        const now = ctx.currentTime;
-        // Basic interruption logic: If user is talking, we might want to clear schedule. 
-        // But here we rely on server "interrupted" message to clear.
-        const startTime = Math.max(now, nextStartTimeRef.current);
-        source.start(startTime);
-        nextStartTimeRef.current = startTime + audioBuffer.duration;
-        scheduledSourcesRef.current.add(source);
-        source.onended = () => {
-            scheduledSourcesRef.current.delete(source);
-        };
     } catch (e) {
-        console.error("Error playing audio chunk", e);
-    }
-  };
-
-  const stopAllAudio = () => {
-    scheduledSourcesRef.current.forEach(source => { try { source.stop(); } catch(e) {} });
-    scheduledSourcesRef.current.clear();
-    if (outputAudioContextRef.current) {
-        nextStartTimeRef.current = outputAudioContextRef.current.currentTime;
+      console.error(e);
+      setConnectionState(ConnectionState.DISCONNECTED);
+      setNotification({ visible: true, message: "INIT FAILED", type: "warning" });
     }
   };
 
   const handleDisconnect = () => {
-    // Save Session if valid
-    if (connectionState === ConnectionState.CONNECTED) {
-        saveSession();
-    }
-
     setConnectionState(ConnectionState.DISCONNECTED);
-    if (audioStreamRef.current) {
-        audioStreamRef.current.getTracks().forEach(track => track.stop());
-        audioStreamRef.current = null;
+    setAtmosphere('default');
+    setIsCameraOn(false);
+    setBlackboard(prev => ({ ...prev, isOpen: false }));
+    
+    // Cleanup Audio
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(t => t.stop());
+      mediaStreamRef.current = null;
     }
     if (processorRef.current) {
-        processorRef.current.disconnect();
-        processorRef.current = null;
+      processorRef.current.disconnect();
+      processorRef.current = null;
     }
-    if (sourceRef.current) {
-        sourceRef.current.disconnect();
-        sourceRef.current = null;
+    // Cleanup Video
+    if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+    
+    // Stop Playback
+    scheduledSourcesRef.current.forEach(s => s.stop());
+    scheduledSourcesRef.current.clear();
+  };
+
+  // --- AUDIO INPUT ---
+  const startAudioInput = (stream: MediaStream, sessionPromise: Promise<any>) => {
+    if (!audioContextRef.current) return;
+
+    // We need a separate context for input usually to match sample rates, 
+    // but here we use the main one or create a specific input path.
+    // Simplified for this example: Use a ScriptProcessor
+    const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: AUDIO_INPUT_SAMPLE_RATE });
+    const source = inputCtx.createMediaStreamSource(stream);
+    const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+    
+    processor.onaudioprocess = (e) => {
+      if (!isMicOn) return;
+      
+      // Calculate volume for UI
+      const inputData = e.inputBuffer.getChannelData(0);
+      let sum = 0;
+      for(let i=0; i<inputData.length; i+=10) sum += Math.abs(inputData[i]);
+      setVolumeLevel(sum / (inputData.length/10));
+
+      const blob = createAudioBlob(inputData);
+      sessionPromise.then(sess => sess.sendRealtimeInput({ media: blob }));
+    };
+
+    source.connect(processor);
+    processor.connect(inputCtx.destination); // Need to connect to destination for Chrome to fire events
+    processorRef.current = processor;
+  };
+
+  // --- HANDLING MESSAGES ---
+  const handleMessage = async (msg: LiveServerMessage, sessionPromise: Promise<any>) => {
+    // 1. Audio
+    const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+    if (audioData && audioContextRef.current && analyserRef.current) {
+      playAudio(audioData);
     }
-    stopVideoInput();
-    setIsCameraOn(false);
-    setIsScreenShareOn(false);
-    setBlackboard(prev => ({...prev, isOpen: false}));
-    setAtmosphere('default');
-    stopAllAudio();
-    sessionStartTimeRef.current = 0;
-    if (outputAudioContextRef.current) outputAudioContextRef.current.suspend();
-    if (themeTimerRef.current) {
-        clearTimeout(themeTimerRef.current);
-        themeTimerRef.current = null;
+
+    // 2. Interruption
+    if (msg.serverContent?.interrupted) {
+      scheduledSourcesRef.current.forEach(s => s.stop());
+      scheduledSourcesRef.current.clear();
+      nextStartTimeRef.current = audioContextRef.current?.currentTime || 0;
+    }
+
+    // 3. Tools
+    if (msg.toolCall) {
+      const responses = msg.toolCall.functionCalls.map(fc => {
+        let result = { status: 'ok' };
+        if (fc.name === 'update_blackboard') {
+           setBlackboard({ isOpen: true, title: fc.args.title, content: fc.args.content });
+        } else if (fc.name === 'set_atmosphere') {
+           setAtmosphere(fc.args.mood);
+        } else if (fc.name === 'show_notification') {
+           setNotification({ visible: true, message: fc.args.message, type: fc.args.type });
+        }
+        return { id: fc.id, name: fc.name, response: { result } };
+      });
+      
+      const session = await sessionPromise;
+      session.sendToolResponse({ functionResponses: responses });
     }
   };
 
-  const toggleMic = () => setIsMicOn(prev => !prev);
+  const playAudio = (base64: string) => {
+    if (!audioContextRef.current || !analyserRef.current) return;
+    const ctx = audioContextRef.current;
+    
+    try {
+      const bytes = base64ToBytes(base64);
+      const buffer = decodeAudioData(bytes, ctx);
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(analyserRef.current);
+      
+      const start = Math.max(ctx.currentTime, nextStartTimeRef.current);
+      source.start(start);
+      nextStartTimeRef.current = start + buffer.duration;
+      
+      scheduledSourcesRef.current.add(source);
+      source.onended = () => scheduledSourcesRef.current.delete(source);
+    } catch(e) { console.error("Audio Decode Error", e); }
+  };
 
-  useEffect(() => {
-    return () => handleDisconnect();
-  }, []);
-
-  useEffect(() => {
-    if (connectionState === ConnectionState.CONNECTED && outputAudioContextRef.current?.state === 'suspended') {
-        outputAudioContextRef.current.resume();
+  // --- VIDEO HANDLING ---
+  const toggleCamera = async () => {
+    if (isCameraOn) {
+      setIsCameraOn(false);
+      if (videoIntervalRef.current) clearInterval(videoIntervalRef.current);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+        }
+        setIsCameraOn(true);
+        
+        // Start sending frames
+        videoIntervalRef.current = window.setInterval(async () => {
+          if (!videoRef.current || !canvasRef.current || !sessionRef.current) return;
+          const ctx = canvasRef.current.getContext('2d');
+          canvasRef.current.width = videoRef.current.videoWidth;
+          canvasRef.current.height = videoRef.current.videoHeight;
+          ctx?.drawImage(videoRef.current, 0, 0);
+          
+          const base64 = canvasRef.current.toDataURL('image/jpeg', 0.5).split(',')[1];
+          const sess = await sessionRef.current;
+          sess.sendRealtimeInput({ media: { mimeType: 'image/jpeg', data: base64 } });
+        }, 1000); // 1 FPS to save bandwidth
+        
+      } catch (e) {
+        setNotification({ visible: true, message: "CAMERA ERROR", type: "warning" });
+      }
     }
-  }, [connectionState]);
+  };
 
-  // Background Styles
-  const getBackgroundGradient = () => {
+  // --- RENDER HELPERS ---
+  useEffect(() => {
+    if (notification.visible) {
+      const t = setTimeout(() => setNotification(prev => ({...prev, visible: false})), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [notification]);
+
+  const getThemeColor = () => {
     switch(atmosphere) {
-        case 'focus': return 'from-gray-900 to-black';
-        case 'calm': return 'from-slate-800 to-black';
-        case 'energy': return 'from-gray-800 to-slate-900';
-        case 'alert': return 'from-red-900/20 to-black';
-        case 'stranger': return 'from-red-950 to-black'; // Stranger Things Theme
-        default: return 'from-zinc-900 via-black to-black'; // Strict Black/Gray Default
+      case 'stranger': return 'text-red-500 border-red-500 shadow-red-900';
+      case 'energy': return 'text-purple-400 border-purple-500 shadow-purple-900';
+      case 'calm': return 'text-teal-400 border-teal-500 shadow-teal-900';
+      default: return 'text-cyan-400 border-cyan-500 shadow-cyan-900';
     }
-  };
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const formatDate = (ms: number) => {
-    return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' });
   };
 
   return (
-    <div className={`relative w-full h-screen bg-black text-white overflow-hidden flex flex-col items-center justify-between font-sans`}>
+    <div className="relative w-full h-screen bg-black text-gray-200 overflow-hidden font-sans selection:bg-cyan-500/30">
       
-      {/* Hidden Media Elements for Processing (Canvas) */}
-      <canvas ref={canvasElRef} className="hidden" />
+      {/* BACKGROUND & EFFECTS */}
+      <div className="absolute inset-0 bg-noise pointer-events-none z-0"></div>
+      <div className={`absolute inset-0 bg-gradient-to-b from-black via-transparent to-black opacity-80 z-0 transition-colors duration-1000 ${
+        atmosphere === 'stranger' ? 'via-red-950/20' : ''
+      }`} />
+      
+      {/* HIDDEN ELEMENTS FOR PROCESSING */}
+      <canvas ref={canvasRef} className="hidden" />
+      <video ref={videoRef} className="hidden" muted playsInline />
 
-      {/* Dynamic Background Layer */}
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden bg-grid-pattern">
-        <div className={`absolute inset-0 bg-gradient-to-b ${getBackgroundGradient()} transition-all duration-1000 opacity-90`} />
-        {/* Glow Orbs - now Grayscale/White for default */}
-        <div className={`absolute top-[-20%] left-[20%] w-[60%] h-[50%] rounded-full blur-[120px] transition-colors duration-1000 ${
-            atmosphere === 'energy' ? 'bg-white/10' : 
-            atmosphere === 'stranger' ? 'bg-red-600/10' : 
-            'bg-gray-700/10'
-        }`} />
+      {/* --- LAYER 1: VISUALIZER (THE CORE) --- */}
+      <div className="absolute inset-0 z-10 flex items-center justify-center">
+        <Visualizer 
+          analyser={analyserRef.current} 
+          isActive={connectionState === ConnectionState.CONNECTED} 
+          mood={atmosphere}
+        />
+      </div>
+
+      {/* --- LAYER 2: HUD OVERLAY --- */}
+      <div className="relative z-20 w-full h-full flex flex-col justify-between p-6 md:p-12 pointer-events-none">
         
-        {/* Stranger Things Particles */}
-        {atmosphere === 'stranger' && (
-             <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 mix-blend-overlay"></div>
-        )}
-      </div>
+        {/* TOP BAR */}
+        <div className="flex justify-between items-start">
+          <div className="flex flex-col gap-1 animate-fade-in">
+             <div className="flex items-center gap-2">
+                <Cpu size={18} className={getThemeColor().split(' ')[0]} />
+                <h1 className="font-tech text-2xl font-bold tracking-widest text-white">SAM <span className="text-xs opacity-50 font-normal">OS v3.0</span></h1>
+             </div>
+             <div className="flex items-center gap-2 text-[10px] font-mono tracking-widest text-gray-500 uppercase">
+                <Activity size={10} />
+                <span>Neural Engine: {connectionState}</span>
+             </div>
+          </div>
 
-      {/* Video Feed Layer */}
-      <video 
-        ref={videoElRef} 
-        className={`absolute inset-0 w-full h-full object-cover z-0 transition-opacity duration-500 ${
-          (isCameraOn || isScreenShareOn) ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        } ${isCameraOn ? '-scale-x-100' : ''}`} 
-        muted 
-        playsInline 
-        autoPlay 
-      />
+          {/* NOTIFICATION TOAST */}
+          <div className={`transition-all duration-500 transform ${notification.visible ? 'translate-y-0 opacity-100' : '-translate-y-4 opacity-0'}`}>
+            <div className={`flex items-center gap-3 px-6 py-2 bg-black/80 backdrop-blur border border-l-4 ${
+              notification.type === 'warning' ? 'border-l-red-500 border-white/10' : 'border-l-cyan-500 border-white/10'
+            }`}>
+              <Zap size={14} className="text-white" />
+              <span className="font-mono text-xs text-white uppercase tracking-wider">{notification.message}</span>
+            </div>
+          </div>
+        </div>
 
-      {/* Notification Toast */}
-      <div className={`absolute top-20 right-6 z-50 transition-all duration-300 transform ${notification.visible ? 'translate-x-0 opacity-100' : 'translate-x-10 opacity-0'}`}>
-         <div className={`flex items-center gap-3 px-4 py-3 rounded-md backdrop-blur-md border ${
-             notification.type === 'warning' ? 'bg-red-900/40 border-red-500/30' : 
-             notification.type === 'success' ? 'bg-green-900/40 border-green-500/30' : 
-             'bg-gray-900/80 border-white/20'
-         }`}>
-             <Zap size={16} className={notification.type === 'warning' ? 'text-red-400' : 'text-white'} />
-             <span className="text-sm font-tech tracking-wide text-gray-200">{notification.message}</span>
-         </div>
-      </div>
-
-      {/* HISTORY MODAL / SIDEBAR */}
-      {showHistory && (
-          <div className="absolute inset-0 z-[60] bg-black/90 backdrop-blur-sm flex justify-end">
-              <div className="w-full max-w-sm h-full bg-black border-l border-white/10 p-6 overflow-hidden flex flex-col animate-in slide-in-from-right duration-300">
-                   <div className="flex justify-between items-center mb-8">
-                       <h2 className="text-xl font-tech text-white flex items-center gap-2"><Cpu size={20}/> NEURAL ARCHIVES</h2>
-                       <button onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-white transition"><X/></button>
-                   </div>
-
-                   <button 
-                       onClick={() => { handleDisconnect(); setShowHistory(false); connectToGemini(); }}
-                       className="flex items-center justify-center gap-2 w-full py-3 bg-white text-black font-bold rounded-sm hover:bg-gray-200 transition mb-6 font-tech text-sm uppercase tracking-wider"
-                   >
-                       <Plus size={16}/> New Live Session
-                   </button>
-
-                   <div className="flex-1 overflow-y-auto space-y-3">
-                       {sessions.length === 0 && <p className="text-center text-gray-600 text-sm mt-10 font-mono">No archival data found.</p>}
-                       {sessions.map(session => (
-                           <div key={session.id} className="group p-4 rounded bg-gray-900/50 border border-white/5 hover:border-white/30 transition flex justify-between items-start">
-                               <div>
-                                   <div className="text-xs text-gray-400 font-mono mb-1">{formatDate(session.timestamp)}</div>
-                                   <div className="text-sm text-gray-200 flex items-center gap-2">
-                                       <Clock size={12}/> {formatTime(session.durationSeconds)}
-                                   </div>
-                               </div>
-                               <button onClick={() => deleteSession(session.id)} className="text-white/20 hover:text-red-400 opacity-0 group-hover:opacity-100 transition">
-                                   <Trash2 size={16}/>
-                               </button>
-                           </div>
-                       ))}
-                   </div>
+        {/* CENTER BLACKBOARD (Modal) */}
+        {blackboard.isOpen && (
+           <div className="absolute inset-0 flex items-center justify-center pointer-events-auto z-50 bg-black/60 backdrop-blur-sm animate-fade-in">
+              <div className="w-full max-w-2xl bg-black/90 border border-white/20 p-8 shadow-[0_0_50px_rgba(0,0,0,0.8)] relative">
+                  <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                     <h2 className={`font-tech text-lg tracking-widest ${getThemeColor().split(' ')[0]}`}>{blackboard.title || "DATA STREAM"}</h2>
+                     <button onClick={() => setBlackboard(prev => ({...prev, isOpen: false}))} className="hover:text-white transition"><X /></button>
+                  </div>
+                  <pre className="font-mono text-sm text-gray-300 whitespace-pre-wrap overflow-y-auto max-h-[60vh] custom-scrollbar">
+                    {blackboard.content}
+                  </pre>
+                  <div className="absolute top-0 left-0 w-2 h-2 border-t border-l border-white"></div>
+                  <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-white"></div>
+                  <div className="absolute bottom-0 left-0 w-2 h-2 border-b border-l border-white"></div>
+                  <div className="absolute bottom-0 right-0 w-2 h-2 border-b border-r border-white"></div>
               </div>
-          </div>
-      )}
+           </div>
+        )}
 
-      {/* BLACKBOARD OVERLAY */}
-      {blackboard.isOpen && (
-          <div className="absolute inset-0 z-50 bg-black flex flex-col items-center justify-center p-8 animate-in fade-in duration-500">
-                <div className="absolute top-0 left-0 w-full h-20 bg-gradient-to-b from-transparent via-white/10 to-transparent blur-md pointer-events-none scanline-anim z-10" />
-                <div className="w-full max-w-3xl h-full flex flex-col pt-20 pb-24 relative z-0">
-                    <div className="flex justify-between items-center mb-6 border-b border-white/20 pb-4">
-                        <h2 className="text-xl font-tech text-white uppercase tracking-widest">{blackboard.title || "SAM VISUALIZER"}</h2>
-                        <button onClick={() => setBlackboard(prev => ({...prev, isOpen: false}))} className="text-gray-500 hover:text-white">
-                            <Minimize2 />
-                        </button>
-                    </div>
-                    <div className="flex-1 overflow-auto font-mono text-lg leading-relaxed text-gray-300 whitespace-pre-wrap">
-                        {blackboard.content}
-                        <span className="inline-block w-2 h-5 ml-1 bg-white animate-pulse"/>
-                    </div>
-                </div>
-          </div>
-      )}
+        {/* BOTTOM BAR (CONTROLS) */}
+        <div className="flex items-end justify-center pointer-events-auto pb-8">
+           
+           {/* DISCONNECTED STATE */}
+           {connectionState === ConnectionState.DISCONNECTED && (
+              <button 
+                onClick={connectToGemini}
+                className="group relative flex items-center justify-center w-24 h-24 rounded-full border border-cyan-500/30 bg-black/50 hover:bg-cyan-900/10 transition-all duration-500 hover:scale-110 hover:shadow-[0_0_30px_rgba(0,255,255,0.3)]"
+              >
+                 <div className="absolute inset-0 rounded-full border border-cyan-500 opacity-20 animate-ping"></div>
+                 <Power size={32} className="text-cyan-400 group-hover:text-white transition-colors" />
+                 <span className="absolute -bottom-8 font-tech text-[10px] tracking-[0.3em] text-cyan-500/50">INITIALIZE</span>
+              </button>
+           )}
 
-      <Visualizer 
-        analyser={analyser} 
-        isActive={connectionState === ConnectionState.CONNECTED}
-        mood={atmosphere}
-      />
+           {/* CONNECTING STATE */}
+           {connectionState === ConnectionState.CONNECTING && (
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-16 h-16 rounded-full border-2 border-t-cyan-400 border-r-transparent border-b-cyan-400 border-l-transparent animate-spin"></div>
+                <span className="font-mono text-xs animate-pulse text-cyan-400">ESTABLISHING LINK...</span>
+              </div>
+           )}
 
-      {/* Header */}
-      <div className="relative z-40 w-full max-w-md px-6 py-8 flex justify-between items-center">
-        {connectionState === ConnectionState.CONNECTED ? (
-             <button onClick={handleDisconnect} className="p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition">
-                 <X size={24} className="text-gray-300" />
-             </button>
-        ) : <div className="w-10"/>}
-        
-        <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10">
-             <div className="flex space-x-1">
-                 <span className={`w-0.5 h-3 bg-white animate-pulse ${connectionState === 'CONNECTED' ? '' : 'opacity-0'}`}></span>
-                 <span className={`w-0.5 h-4 bg-white animate-pulse delay-75 ${connectionState === 'CONNECTED' ? '' : 'opacity-0'}`}></span>
-                 <span className={`w-0.5 h-3 bg-white animate-pulse delay-150 ${connectionState === 'CONNECTED' ? '' : 'opacity-0'}`}></span>
-             </div>
-             <span className="text-sm font-semibold tracking-wide font-tech text-gray-200">SAM VERCE</span>
+           {/* CONNECTED CONTROLS */}
+           {connectionState === ConnectionState.CONNECTED && (
+              <div className="flex items-center gap-6 animate-fade-in">
+                 
+                 {/* Cam Toggle */}
+                 <button 
+                   onClick={toggleCamera}
+                   className={`p-4 rounded-full border transition-all duration-300 hover:scale-105 ${
+                     isCameraOn 
+                     ? 'bg-white text-black border-white shadow-[0_0_20px_rgba(255,255,255,0.4)]' 
+                     : 'bg-black/40 text-gray-400 border-gray-700 hover:border-gray-400 hover:text-white'
+                   }`}
+                 >
+                   {isCameraOn ? <Video size={20} /> : <CameraOff size={20} />}
+                 </button>
+
+                 {/* Mic Toggle (Main) */}
+                 <button 
+                   onClick={() => setIsMicOn(!isMicOn)}
+                   className={`relative p-6 rounded-full border transition-all duration-300 hover:scale-110 ${
+                     isMicOn 
+                     ? `bg-black/60 text-white border-white/50 shadow-[0_0_30px_rgba(255,255,255,0.15)]`
+                     : 'bg-red-900/20 text-red-500 border-red-500/50'
+                   }`}
+                 >
+                   {isMicOn ? <Mic size={28} /> : <MicOff size={28} />}
+                   {/* Voice Activity Ring */}
+                   {isMicOn && (
+                     <div 
+                       className="absolute inset-0 rounded-full border border-white/30 transition-transform duration-75"
+                       style={{ transform: `scale(${1 + volumeLevel * 0.5})` }}
+                     />
+                   )}
+                 </button>
+
+                 {/* Disconnect */}
+                 <button 
+                   onClick={handleDisconnect}
+                   className="p-4 rounded-full bg-red-950/30 text-red-500 border border-red-900/50 hover:bg-red-900/50 hover:border-red-500 transition-all duration-300 hover:scale-105"
+                 >
+                   <X size={20} />
+                 </button>
+
+              </div>
+           )}
         </div>
-
-        {connectionState === ConnectionState.CONNECTED ? (
-            supportsScreenShare ? (
-             <button 
-                onClick={toggleScreenShare}
-                className={`p-2 rounded-full backdrop-blur-md transition border ${isScreenShareOn ? 'bg-white text-black border-white' : 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-300'}`}
-             >
-                <MonitorUp size={24} />
-             </button>
-            ) : <div className="w-10"></div>
-        ) : (
-             <button onClick={() => setShowHistory(true)} className="p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition">
-                 <MoreHorizontal size={24} className="text-gray-300"/>
-             </button>
-        )}
       </div>
-
-      {/* Center Content */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-6 text-center">
-        {connectionState === ConnectionState.DISCONNECTED && (
-             <div className="animate-in fade-in zoom-in duration-700 flex flex-col items-center">
-                <div className="mb-8 relative group">
-                    <div className="absolute inset-0 bg-white blur-[80px] opacity-0 group-hover:opacity-10 transition-opacity duration-1000"></div>
-                    <h1 className="text-8xl font-tech font-black tracking-tighter text-white/90 scale-y-110 relative z-10">SAM</h1>
-                    <div className="h-1 w-24 bg-white/50 mx-auto mt-2"></div>
-                </div>
-                <p className="text-gray-500 font-tech text-[10px] uppercase tracking-[0.4em] mb-12">
-                    Autonomous Neural Interface
-                </p>
-
-                {/* Voice Selector */}
-                <div className="mb-12 flex flex-col items-center gap-3">
-                   <div className="flex items-center gap-2 text-gray-500 font-tech text-[10px] tracking-widest mb-1">
-                      <AudioLines size={12}/> VOICE IDENTITY
-                   </div>
-                   <div className="flex flex-wrap justify-center gap-2">
-                      {VOICES.map(v => (
-                         <button 
-                             key={v.name}
-                             onClick={() => setVoiceName(v.name)}
-                             className={`px-3 py-1.5 rounded-sm border text-[10px] font-bold font-tech tracking-wider transition-all duration-300 ${
-                                 voiceName === v.name 
-                                 ? 'bg-white text-black border-white scale-105 shadow-[0_0_10px_rgba(255,255,255,0.3)]' 
-                                 : 'bg-transparent text-gray-600 border-gray-800 hover:border-gray-500 hover:text-gray-400'
-                             }`}
-                         >
-                            {v.name.toUpperCase()}
-                         </button>
-                      ))}
-                   </div>
-                </div>
-
-                <button 
-                    onClick={connectToGemini}
-                    className="group relative flex items-center gap-3 px-8 py-4 bg-black border border-white/20 hover:border-white transition-all duration-300 overflow-hidden"
-                >
-                    <div className="absolute inset-0 bg-white/5 translate-y-full group-hover:translate-y-0 transition-transform duration-300"/>
-                    <Power size={18} className="text-white relative z-10" />
-                    <span className="font-tech font-bold text-sm tracking-widest text-white relative z-10">INITIALIZE</span>
-                </button>
-             </div>
-        )}
-
-        {connectionState === ConnectionState.CONNECTING && (
-            <div className="flex flex-col items-center gap-8">
-                <div className="relative w-16 h-16 flex items-center justify-center">
-                     <span className="absolute inline-flex h-full w-full rounded-full bg-gray-500 opacity-20 animate-ping"></span>
-                     <div className="w-3 h-3 bg-white rounded-full shadow-[0_0_15px_rgba(255,255,255,0.8)]"></div>
-                </div>
-                <div className="font-tech text-gray-400 text-xs tracking-[0.3em] uppercase animate-pulse">
-                    System Syncing...
-                </div>
-            </div>
-        )}
-        
-        {connectionState === ConnectionState.ERROR && (
-             <div className="text-red-400 bg-red-950/20 backdrop-blur-md px-8 py-6 border border-red-500/20 max-w-sm font-mono text-sm">
-                 <div className="flex items-center justify-center gap-2 mb-4 font-bold uppercase tracking-wider text-red-500"><Zap size={16}/> System Failure</div>
-                 <p className="text-center opacity-80 mb-6 leading-relaxed">{errorMsg || "Connection Failed"}</p>
-                 <button onClick={() => setConnectionState(ConnectionState.DISCONNECTED)} className="block w-full py-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 uppercase text-xs tracking-wider transition">Reboot System</button>
-             </div>
-        )}
-      </div>
-
-      {/* Bottom Controls */}
-      {connectionState === ConnectionState.CONNECTED && (
-        <div className="relative z-50 w-full max-w-md px-6 pb-10 pt-4 flex items-center justify-between gap-4 animate-in slide-in-from-bottom-10 duration-700">
-            <div className="flex gap-3">
-                 <button 
-                    onClick={toggleCamera}
-                    className={`p-4 rounded-full backdrop-blur-xl border transition active:scale-95 ${isCameraOn ? 'bg-white text-black border-white' : 'bg-black/40 text-gray-300 border-white/10 hover:bg-white/10'}`}
-                 >
-                    {isCameraOn ? <Video size={24} /> : <CameraOff size={24} />}
-                 </button>
-                 <button 
-                    onClick={() => setShowHistory(true)}
-                    className="p-4 rounded-full bg-black/40 backdrop-blur-xl border border-white/10 hover:bg-white/10 transition active:scale-95"
-                 >
-                    <History size={24} className="text-gray-300" />
-                 </button>
-            </div>
-
-            <div className="flex gap-3">
-                 <button 
-                    onClick={toggleMic}
-                    className={`p-4 rounded-full backdrop-blur-xl border transition-all duration-300 active:scale-95 ${isMicOn ? 'bg-white/10 hover:bg-white/20 text-white border-white/20' : 'bg-red-900/20 text-red-400 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]'}`}
-                 >
-                    {isMicOn ? <Mic size={28} /> : <MicOff size={28} />}
-                 </button>
-                 <button 
-                    onClick={handleDisconnect}
-                    className="p-4 rounded-full bg-red-600/90 hover:bg-red-500 text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] transition-all active:scale-95 border border-red-400"
-                 >
-                    <PhoneOff size={28} fill="currentColor" />
-                 </button>
-            </div>
-        </div>
-      )}
-
-      {/* Footer */}
-      <div className="absolute bottom-2 left-0 w-full text-center pointer-events-none opacity-20 text-[9px] font-tech text-gray-500 tracking-[0.3em]">
-        SAM VERCE // v2.5.0
-      </div>
-
     </div>
   );
 };
