@@ -135,7 +135,9 @@ const App: React.FC = () => {
       mediaStreamRef.current = stream;
 
       // API Client
-      const client = new GoogleGenAI({ apiKey: "AIzaSyBjXyosFcoqBbL9QxCdnqo1cBMp-5-SDfw" }); // Use env in production
+      // IMPORTANT: Use process.env.API_KEY for Vercel/Production security.
+      // Do not hardcode keys in production apps.
+      const client = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const sessionPromise = client.live.connect({
         model: MODEL_NAME,
@@ -164,7 +166,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
       setConnectionState(ConnectionState.DISCONNECTED);
-      setNotification({ visible: true, message: "INIT FAILED", type: "warning" });
+      setNotification({ visible: true, message: "INIT FAILED - CHECK API KEY", type: "warning" });
     }
   };
 
@@ -195,9 +197,9 @@ const App: React.FC = () => {
   const startAudioInput = (stream: MediaStream, sessionPromise: Promise<any>) => {
     if (!audioContextRef.current) return;
 
-    // We need a separate context for input usually to match sample rates, 
-    // but here we use the main one or create a specific input path.
-    // Simplified for this example: Use a ScriptProcessor
+    // Use a separate context for input processing to avoid feedback loops if needed
+    // or reusing the main context but being careful with connections.
+    // For visualizer simplicity, we use the same concept as before.
     const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: AUDIO_INPUT_SAMPLE_RATE });
     const source = inputCtx.createMediaStreamSource(stream);
     const processor = inputCtx.createScriptProcessor(4096, 1, 1);
@@ -208,15 +210,16 @@ const App: React.FC = () => {
       // Calculate volume for UI
       const inputData = e.inputBuffer.getChannelData(0);
       let sum = 0;
-      for(let i=0; i<inputData.length; i+=10) sum += Math.abs(inputData[i]);
-      setVolumeLevel(sum / (inputData.length/10));
+      // Sampling for performance
+      for(let i=0; i<inputData.length; i+=50) sum += Math.abs(inputData[i]);
+      setVolumeLevel(sum / (inputData.length/50));
 
       const blob = createAudioBlob(inputData);
       sessionPromise.then(sess => sess.sendRealtimeInput({ media: blob }));
     };
 
     source.connect(processor);
-    processor.connect(inputCtx.destination); // Need to connect to destination for Chrome to fire events
+    processor.connect(inputCtx.destination); 
     processorRef.current = processor;
   };
 
