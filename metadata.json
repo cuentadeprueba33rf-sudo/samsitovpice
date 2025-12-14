@@ -1,0 +1,8 @@
+{
+  "name": "SAM - AI Voice Assistant",
+  "description": "A cutting-edge voice interface for SAM, the AI from SAM Verce.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
